@@ -1,0 +1,232 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-10-16"
+---
+```{r}
+
+## Load packages that will be used for this analysis
+library(Seurat)
+library(SeuratData)
+library(ggplot2)
+library(dplyr)
+library(writexl)
+library(patchwork)
+library(Matrix)
+library(cowplot)
+library(slingshot)
+library(tidyverse)
+library(viridis)
+library(scCustomize)
+library(gridExtra)
+library(magrittr)
+library(monocle)
+
+
+```
+
+```{r}
+## Reading the H5 files. HBM is healthy bone marrow
+readRDS('HBM.rds')->HBM
+
+## Normalizing the data
+
+HBM<- NormalizeData(HBM, normalization.method = "LogNormalize", scale.factor = 10000)
+HBM<-FindVariableFeatures(HBM, selection.method = "vst", nfeatures = 19038)
+
+## visualizing and clustering step
+
+HBM<- ScaleData(HBM, verbose = FALSE)
+HBM<- RunPCA(HBM, npcs = 30, verbose = TRUE)
+HBM<- RunUMAP(HBM, reduction = "pca", dims = 1:20)
+HBM<- FindNeighbors(HBM, reduction = "pca", dims = 1:20)
+HBM<- FindClusters(HBM, resolution = 0.5)
+
+DimPlot(HBM, reduction = "umap", label = TRUE, repel = TRUE)
+
+## I am going to run differential expression analysis to identify my cluster signatures. I am using DESeq so I need to modify the counts data a bit before runnign differential analysis
+
+DefaultAssay(HBM) <-"RNA"
+HBM[["RNA"]]@counts <- as.matrix(HBM[["RNA"]]@counts)+1
+HBM.Markers<- FindAllMarkers(HBM, test.use = "DESeq2" )
+
+## I am savign the output of the differential as an excel file
+
+
+write_xlsx(HBM.Markers,"/projects/b1042/BerdnikovsLab/HBM2.Markers.xlsx")
+
+
+```
+
+```{r}
+## After visualizing and running differential expression analysis, I have identified my granulocyte clusters based on gene signatures. My granulocytes are cluster 2,3,4,6, and 12. I will subset these clusters from the larger seurat object and continue my analysis. The new subsetted object will be called sub_HBM2
+
+sub_HBM2 <- subset( HBM, idents = c(2,3,4,6,12))
+
+## I am visualizing my subsetted object to make sure that I took the right clusters. I am also assigning colors for consistency. 
+
+DimPlot(sub_HBM2, reduction = "umap", label = FALSE, repel = TRUE, cols = c('2'='#CD9600', '3'='#ABA300', '4'='#7CAE00', '6'='#00BE67', '12'='#C77CFF'))
+
+```
+
+```{r}
+## Now I want to plot a heatmap based on average gene expression per cluster. You can customize this however you want based on color scale or appearance of heatmap. This code can also be used for dot plots. I will include a section for dotplot. 
+
+## Setting up genes to be plotted
+
+marker_genes = c("S100A8", "S100A9",  "CEBPB",  "LGALS3","CTSD", "LYZ", "JUNB","FCER1G","CSF3R", "ITGAM", "ELANE", "MPO", "PRTN3", "CTSG", "ETV6", "GATA1", "GATA2", "XBP1",  "IKZF2","CLC", "PRG2", "RNASE3", "EPX") 
+
+## Let's get the scaled/log-transformed counts of these genes from the Seurat object
+
+exp_mat <- as.matrix(sub_HBM2[["RNA"]]@data[marker_genes,])
+
+## Let's get cell metadata now
+
+meta <-sub_HBM2@meta.data %>% 
+  select(seurat_clusters)
+
+## Merge in the expression data. Just need to transpose it so that cells are down the rows.
+
+meta <- bind_cols(meta, as.data.frame(t(exp_mat)))
+head(meta) #View the first few lies
+
+## To work with ggplot2, we need to get our data in long/tidy format
+
+meta <- pivot_longer(meta, -seurat_clusters, names_to="Gene", values_to="Expression")
+
+meta_summary <- meta %>%
+  group_by(seurat_clusters, Gene) %>%
+  summarise(Avg = mean(Expression),
+            Pct = sum(Expression > 0) / length(Expression) * 100)
+
+
+## Plot function but first keep the gene list order
+
+meta_summary$Gene <- factor(meta_summary$Gene, levels=marker_genes)
+
+dot_plot <- ggplot(meta_summary, aes(x=Gene, y=seurat_clusters)) +
+  geom_point(aes(size = Pct, fill = Avg), color="black", shape=21) +
+  scale_size("% detected", range = c(0,6)) +
+  scale_fill_gradientn(colours = viridisLite::mako(100),
+                       guide = guide_colorbar(ticks.colour = "black",
+                                              frame.colour = "black"),
+                       name = "Average\Expression") +
+  ylab("Cluster") + xlab("") +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=14, angle=45, hjust=1, color="black"),
+        axis.text.y = element_text(size=15, color="black"),
+        axis.title = element_text(size=14))
+
+dot_plot
+
+heatmap <- ggplot(meta_summary, aes(x=Gene, y=seurat_clusters, fill = Avg ))+  geom_tile(color = "black") +
+  scale_fill_gradientn( colors = viridis(n = 4,  option = "plasma" )) +
+  coord_fixed()+
+ theme(axis.text.x = element_text(size=14, angle=45, hjust=1, color="black"),
+        axis.text.y = element_text(size=15, color="black"),
+        axis.title = element_text(size=14))
+heatmap
+
+
+```
+
+
+
+```{r}
+## Next I will perfrom slingshot trajectory analysis on the subsetted object
+
+## Save the objects as separate matrices for input in slingshot
+dimred <- sub_HBM2@reductions$umap@cell.embeddings
+clustering <- sub_HBM2$RNA_snn_res.0.5
+counts <- as.matrix(sub_HBM2@assays$RNA@counts[sub_HBM2@assays$RNA@var.features, ])
+
+## Define a color pallete to use
+pal <- c(RColorBrewer::brewer.pal(9, "Set1"), RColorBrewer::brewer.pal(8, "Set2"))
+
+## Run default Slingshot lineage identification
+set.seed(1)
+lineages <- getLineages(data = dimred, clusterLabels = clustering, end.clus = c( "4", "12"), #define how many branches/lineages to consider, and whcih cluster to start and end the lineage 
+                        start.clus = c("6"),
+                 #omega = TRUE  
+                         )
+
+lineages
+
+
+
+## Plot the lineages
+par(mfrow = c(1, 2))
+plot(dimred[, 1:2], col = pal[clustering], cex = 0.5, pch = 16)
+for (i in levels(clustering)) {
+    text(mean(dimred[clustering == i, 1]), mean(dimred[clustering == i, 2]), labels = i, font = 2)
+}
+plot(dimred[, 1:2], col = pal[clustering], cex = 0.5, pch = 16)
+lines(SlingshotDataSet(lineages), lwd=2, col='black', show.constraints = TRUE)
+```
+
+
+```{r}
+## There are differnt ways to perform trajectory analysis. I initially used slignshot but you can use monocle as well. I will use both and compare. 
+
+## Before I start I will save what I have done so far as a .rds object and reload it for ease. 
+saveRDS(sub_HBM2,file="sub_HBM2.rds")
+
+HBM <- readRDS("sub_HBM2.rds")
+
+
+## I need a differential signature to perform Monocle. I will run differential analysis using ROC method. 
+
+deg <- FindAllMarkers(HBM, test.use = "roc" )
+
+## The data need to be a celldataset object before we start. Transfer to cds
+cds <- as.CellDataSet(HBM, reduction = "umap")
+
+## estimate size factor
+cds <- estimateSizeFactors(cds)
+cds <- estimateDispersions(cds)
+
+## I will use the differeential expressin list I just generated for this object to generate the trajectories
+
+deg <- deg[which(deg$cluster %in% unique(HBM$seurat_clusters)), ]
+sel.gene <- unique(deg$gene)
+cds <- monocle::setOrderingFilter(cds, sel.gene)
+
+
+
+## dimension reduciton
+cds <- monocle::reduceDimension(cds, method = 'DDRTree')
+
+## ordering cells. You need to run this at least once before you can assign a roor node (the origin of the trajectory)
+
+cds <- monocle::orderCells(cds)
+
+## ordering cells by assigning root nodes. My root node will be cluster 6.
+GM_state <- function(cds){
+  if (length(unique(cds$State)) > 1){
+    T0_counts <- table(cds$State, cds$seurat_clusters)[, "6"]
+    return(as.numeric(names(T0_counts)[which
+                                       (T0_counts == max(T0_counts))]))
+  } else {
+    return (1)
+  }
+}
+cds <- monocle::orderCells(cds, root_state =  GM_state(cds))
+
+## Now to plot the trajectory. You can customize the colors as you like
+
+monocle::plot_cell_trajectory(cds, color_by = "seurat_clusters") + scale_color_manual(values = c("mediumpurple", "green4", "firebrick3", "darkorange1", "dodgerblue3" ))
+
+
+plot_complex_cell_trajectory(cds, color_by = "seurat_clusters")
+
+monocle::plot_cell_trajectory(cds, color_by = "Pseudotime", cell_size = 4) +   scale_color_viridis(option = "A", direction = -1)
+```
+
+```{r}
+## Now I will plot psurdotime for specific genes of interst that I will call my_genes
+my_genes <- c( "CTSG", "CTSD", "ELANE", "FCER1G", "MPO", "TIMP2")
+cds_subset <- cds[my_genes,]
+plot_genes_in_pseudotime(cds_subset, color_by = "seurat_clusters", cell_size = 1.5)
+
+```
+

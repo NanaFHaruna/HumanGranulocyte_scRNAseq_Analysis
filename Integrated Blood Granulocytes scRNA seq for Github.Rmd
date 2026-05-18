@@ -1,0 +1,332 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-10-16"
+---
+
+```{r}
+library(Seurat)
+library(SeuratData)
+library(ggplot2)
+library(hdf5r)
+library(dplyr)
+library(writexl)
+library(tidyverse)
+library(viridis)
+library(scCustomize)
+library(gridExtra)
+library(magrittr)
+
+```
+
+```{r}
+
+##  I have different datasets that I want to integrate while preserving their identiy. I will take neutrophils and eosinophisl from different datsets, put them together and analyze it. 
+
+
+```
+
+```{r}
+## Loading the files - Human eos from the neu + eos combination sequencing
+Read10X_h5('Neu+Eos.h5')->BloodGran
+CreateSeuratObject(counts=BloodGran)->BloodGran
+
+BloodGran<- NormalizeData(BloodGran, normalization.method = "LogNormalize", scale.factor = 10000)
+BloodGran<-FindVariableFeatures(BloodGran, selection.method = "vst", nfeatures = 2000)
+
+## visualizing and clustering step
+
+BloodGran<- ScaleData(BloodGran, verbose = FALSE)
+BloodGran<- RunPCA(BloodGran, npcs = 30, verbose = TRUE)
+BloodGran<- RunUMAP(BloodGran, reduction = "pca", dims = 1:20)
+BloodGran<- FindNeighbors(BloodGran, reduction = "pca", dims = 1:20)
+BloodGran<- FindClusters(BloodGran, resolution = 0.5)
+
+DimPlot(BloodGran, reduction = "umap", label = FALSE, repel = TRUE)
+
+FeaturePlot(BloodGran, features = c("S100A8", "S100A9", "CLC", "CCR3" , "CSF3R", "CXCR2", "EPX", "MPO", "ELANE", "SIGLEC8"))
+```
+
+```{r}
+## Loading the files - Human eos from the neu + eos combination sequencing
+Read10X_h5('HeaGran.h5')->HeaGran
+
+## need to create sepearte seurat objects and combine them later on
+CreateSeuratObject(counts=HeaGran$`Gene Expression`)->HeaGrans
+CreateAssayObject(counts=HeaGran$`Antibody Capture`)->ADT_assay
+## adding ADT assay to the gene seurat object
+HeaGrans[["ADT"]] <- ADT_assay
+
+## checking that the seurat object contains assay for RNA and ADT. This is a CiteSeq object so it has both RNA and protein information. 
+
+Assays(HeaGrans)
+
+## List of features measured in ADT assay
+
+rownames(HeaGrans[["ADT"]])
+
+
+DefaultAssay(HeaGrans)
+
+HeaGrans<- NormalizeData(HeaGrans, normalization.method = "LogNormalize", scale.factor = 10000)
+HeaGrans<-FindVariableFeatures(HeaGrans, selection.method = "vst", nfeatures = 2000)
+
+## visualizing and clustering step
+
+HeaGrans<- ScaleData(HeaGrans, verbose = FALSE)
+HeaGrans<- RunPCA(HeaGrans, npcs = 30, verbose = TRUE)
+HeaGrans<- RunUMAP(HeaGrans, reduction = "pca", dims = 1:20)
+HeaGrans<- FindNeighbors(HeaGrans, reduction = "pca", dims = 1:20)
+HeaGrans<- FindClusters(HeaGrans, resolution = 0.5)
+
+DimPlot(HeaGrans, reduction = "umap", label = FALSE, repel = TRUE)
+
+FeaturePlot(HeaGrans, features = c("S100A8", "S100A9", "CLC", "CCR3" , "CSF3R", "CXCR2", "EPX", "MPO", "ELANE", "SIGLEC8"))
+```
+
+```{r}
+## Loading the files - Human asthmatic granulocyte on steroid
+Read10X_h5('AsthGran.h5')->AsthGran
+
+## need to create sepearte seurat objects and combine them later on
+CreateSeuratObject(counts=AsthGran$`Gene Expression`)->AsthGrans
+CreateAssayObject(counts=AsthGran$`Antibody Capture`)->ADT_assay
+## adding ADT assay to the gene seurat object
+AsthGrans[["ADT"]] <- ADT_assay
+
+## checking that the seurat object contains assay for RNA and ADT
+Assays(AsthGrans)
+
+## List of features measured in ADT assay
+
+rownames(AsthGrans[["ADT"]])
+DefaultAssay(AsthGrans)
+
+AsthGrans<- NormalizeData(AsthGrans, normalization.method = "LogNormalize", scale.factor = 10000)
+AsthGrans<-FindVariableFeatures(AsthGrans, selection.method = "vst", nfeatures = 2000)
+
+## visualizing and clustering step
+
+AsthGrans<- ScaleData(AsthGrans, verbose = FALSE)
+AsthGrans<- RunPCA(AsthGrans, npcs = 30, verbose = TRUE)
+AsthGrans<- RunUMAP(AsthGrans, reduction = "pca", dims = 1:20)
+AsthGrans<- FindNeighbors(AsthGrans, reduction = "pca", dims = 1:20)
+AsthGrans<- FindClusters(AsthGrans, resolution = 0.5)
+
+DimPlot(AsthGrans, reduction = "umap", label = TRUE, repel = TRUE)
+
+
+
+## I use the feature plots to identify my true granulocyte clusters. You can either use feature plot or violin plot. My selected clusters are 1, 6, 10, 11, and 12
+
+A.Gran <- subset(AsthGrans, idents = c('1', '12', '6', '10', '11'))
+
+DimPlot(A.Gran, reduction = "umap", label = TRUE, repel = TRUE)
+
+FeaturePlot(A.Gran, features = c("S100A8", "S100A9", "CLC", "CCR3" , "LYZ", "CSF3R", "CXCR2", "EPX", "MPO", "ELANE", "SIGLEC8"))
+
+DefaultAssay(A.Gran) <- "ADT"
+
+FeaturePlot_scCustom(A.Gran, features = c("CCR3-TotalA"), na_cutoff = 0, pt = 2)
+
+```
+
+
+```{r}
+## Loading the files - Human asthmatic granulocyte on Dupixent
+Read10X_h5('AsthGran2.h5')->AsthGran2
+
+## need to create sepearte seurat objects and combine them later on
+CreateSeuratObject(counts=AsthGran2$`Gene Expression`)->AsthGrans2
+CreateAssayObject(counts=AsthGran2$`Antibody Capture`)->ADT_assay
+## adding ADT assay to the gene seurat object
+AsthGrans2[["ADT"]] <- ADT_assay
+
+## checking that the seurat object contains assay for RNA and ADT
+Assays(AsthGrans2)
+
+## List of features measured in ADT assay
+
+rownames(AsthGrans2[["ADT"]])
+DefaultAssay(AsthGrans2)
+
+AsthGrans2<- NormalizeData(AsthGrans2, normalization.method = "LogNormalize", scale.factor = 10000)
+AsthGrans2<-FindVariableFeatures(AsthGrans2, selection.method = "vst", nfeatures = 2000)
+
+## visualizing and clustering step
+
+AsthGrans2<- ScaleData(AsthGrans2, verbose = FALSE)
+AsthGrans2<- RunPCA(AsthGrans2, npcs = 30, verbose = TRUE)
+AsthGrans2<- RunUMAP(AsthGrans2, reduction = "pca", dims = 1:20)
+AsthGrans2<- FindNeighbors(AsthGrans2, reduction = "pca", dims = 1:20)
+AsthGrans2<- FindClusters(AsthGrans2, resolution = 0.5)
+
+DimPlot(AsthGrans2, reduction = "umap", label = TRUE, repel = TRUE)
+
+
+
+## I use the feature plots to identify my true granulocyte clusters. You can either use feature plot or violin plot. My selected clusters are "4", "6", "8", "10"
+
+A.Gran2 <- subset(AsthGrans2, idents = c("4", "6", "8", "10"))
+
+DimPlot(A.Gran2, reduction = "umap", label = TRUE, repel = TRUE)
+
+FeaturePlot(A.Gran2, features = c("S100A8", "S100A9", "CLC", "CCR3" , "LYZ", "CSF3R", "CXCR2", "EPX", "MPO", "ELANE", "SIGLEC8"))
+
+DefaultAssay(A.Gran2) <- "ADT"
+
+FeaturePlot_scCustom(A.Gran2, features = c("CCR3-TotalA"), na_cutoff = 0, pt = 2)
+
+```
+
+```{r}
+## Integration healthy blood granulocytes with blood granulocytes from asthmatic patient
+
+## preserving their identify before integration
+
+BloodGran$ident<-sample(c("Healthy 1"), size=ncol(BloodGran), replace=TRUE)
+HeaGrans$ident<-sample(c("Healthy 2"), size=ncol(HeaGrans), replace=TRUE)
+A.Gran$ident<-sample(c("Asthmatic"), size=ncol(A.Gran), replace=TRUE)
+A.Gran2$ident<-sample(c("Dupixent"), size=ncol(A.Gran2), replace=TRUE)
+
+Granlist<-list(BloodGran, HeaGrans, A.Gran, A.Gran2)
+Granlist<-lapply(X=Granlist,FUN=function(x){
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = Granlist)
+GranAnchors <- FindIntegrationAnchors(object.list = Granlist, anchor.features = features)
+GranCombined <- IntegrateData(anchorset = GranAnchors, k.weight = 50)
+
+GranCombined<-ScaleData(GranCombined, verbose=TRUE)
+GranCombined<-RunPCA(GranCombined, npcs=30, verbose=TRUE)
+GranCombined<-RunUMAP(GranCombined,reduction="pca",dims=1:20)
+GranCombined<-FindNeighbors(GranCombined,reduction="pca",dims=1:10)
+GranCombined<-FindClusters(GranCombined,resolution=0.15)
+DimPlot(GranCombined,reduction="umap", label= TRUE, repel=TRUE, pt=1)
+
+Idents(GranCombined) <- "ident"
+DimPlot(GranCombined,reduction="umap", label= TRUE, split.by = "ident", repel=TRUE, pt=1)
+
+FeaturePlot(GranCombined, features = c("S100A8", "S100A9", "CLC", "CCR3" , "CSF3R", "CXCR2", "EPX", "MPO", "ELANE", "SIGLEC8"))
+
+```
+
+```{r}
+## Does it look better merged
+
+Merged <- merge(BloodGran, y= c( HeaGrans, A.Gran, A.Gran2))
+
+Merged<-FindVariableFeatures(Merged, selection.method = "vst", nfeatures = 32285)
+
+Merged<- ScaleData(Merged, verbose = FALSE)
+Merged<- RunPCA(Merged, npcs = 30, verbose = TRUE)
+Merged<- RunUMAP(Merged, reduction = "pca", dims = 1:8)
+Merged<- FindNeighbors(Merged, reduction = "pca", dims = 1:8)
+Merged<- FindClusters(Merged, resolution = 0.05)
+DimPlot(Merged, reduction = "umap", label = TRUE, repel = TRUE)
+
+FeaturePlot(Merged, features = c("S100A8", "S100A9", "CLC", "CCR3" , "CSF3R", "CXCR2", "LYZ", "LAIR1"))
+
+Idents(Merged) <- "ident"
+DimPlot(Merged,reduction="umap", label= TRUE, split.by = "ident", repel=TRUE, pt=1)
+
+Gran_markers <- FindAllMarkers(Merged, test.use = "roc" )
+
+library(dplyr)
+Sig.Gran<-Gran_markers%>%
+  group_by(cluster) %>%
+  filter(myAUC>0.7, avg_log2FC>0.6, avg_diff>0.6)
+
+library("writexl")
+write_xlsx(Sig.Gran,"C:\\Users\\nanah\\Downloads\\DEG_HumanGran.xlsx")
+
+```
+
+```{r}
+## Taking out cluster 6 because it looks too weird and is patient specific
+Merged2 <- subset(Merged, idents = '6', invert = TRUE)
+
+DimPlot(Merged2, reduction = "umap", label = FALSE, repel = TRUE)
+
+saveRDS(Merged2,file="MergedHumanBloodGran.rds")
+
+Idents(Merged2) <- "ident"
+DimPlot(Merged2,reduction="umap", label= TRUE, split.by = "ident", repel=TRUE, pt=1)
+
+FeaturePlot(Merged2, features = c( "CSF3R", "ETV6","CD63", "AZU1", "CTSG"))
+
+
+DoHeatmap(object =Merged2, features = Sig.Gran$gene)
+
+
+```
+
+```{r}
+## Setting up genes to be plotted
+
+marker_genes = c("S100A8", "S100A9", "CXCR2", "JUNB", "RIPOR2", "PPP3CA", "JAML", "DOCK8", "TGFBR2", "PREX1", "FOXP1", "PIK3CD", "PECAM1", "LYST", "SELL", "DUSP1", "FOS", "ZFP36", "FOSB", "NFKBIA", "NCF1",  "RGS2", "DOCK4", "ECE1", "GNG2", "ICAM1", "PTK2B", "DNM2", "SIRPA", "TLR2", "CXCL8", "IRAK2", "TNFRSF1B", "TNFAIP3", "TNIP1",
+                 "LGALS1", "LGALS3", "LYZ", "VIM", "CTSD", "CTSL", "ITGB1", "ITGB8", "IL1B",  "ANXA1", "CTNNB1", "NLRP3", "PPARG", "CD44", "CD74","CD86", "CD99", "CD109", "ID2", "IRF8", "XBP1", "ZFPM1", "CLC", "CCR3",  "GATA2", "IKZF2","BCL2", "ETS1") 
+
+marker_genes = c("THBS1", "TNFSF13", "CAV1", "ANXA1", "IL6", "SRC", "CA2", "FN1", "ADAM9", "COL4A2", "LGALS1", "C3", "TIMP1", "TIMP2", "MMP14", "IGFBP7", "ENG")
+
+marker_genes = c("LGALS1", "FYN", "CTNNB1", "CD74", "HLS-DRB1", "REL", "MALT1", "MTDH", "GSTP1","EEF1D","IRAK1","AKAP13","CXXC5","IL1B", "CD86", "VIM", "CD68", "MTDH", "GSTP1", "ABCA1", "CXCL2", "NFKB1", "CXCL3", "IRAK1", "HAVCR2","NLRP3","IL1B" )
+
+# Let's get the scaled/log-transformed counts of these genes from the Seurat object
+
+exp_mat <- as.matrix(Merged2[["RNA"]]@data[marker_genes,])
+
+## Let's get cell metadata now
+
+meta <-Merged2@meta.data %>% 
+  dplyr::select(seurat_clusters)
+
+## Merge in the expression data. Just need to transpose it so that cells are down the rows.
+
+meta <- bind_cols(meta, as.data.frame(t(exp_mat)))
+head(meta) #View the first few lies
+
+## To work with ggplot2, we need to get our data in long/tidy format
+
+meta <- pivot_longer(meta, -seurat_clusters, names_to="Gene", values_to="Expression")
+
+meta_summary <- meta %>%
+  group_by(seurat_clusters, Gene) %>%
+  summarise(Avg = mean(Expression),
+            Pct = sum(Expression > 0) / length(Expression) * 100)
+
+
+## Plot function but first keep the gene list order
+
+meta_summary$Gene <- factor(meta_summary$Gene, levels=marker_genes)
+
+heatmap <- ggplot(meta_summary, aes(x=Gene, y=seurat_clusters, fill = Avg))+  geom_tile(color = "black") +
+  scale_fill_gradientn( colors = viridis(n = 7,  option = "turbo" )) +
+ #coord_fixed()+
+ theme(axis.text.x = element_text(size=14, angle=90, hjust=1, color="black"),
+        axis.text.y = element_text(size=15, color="black"),
+        axis.title = element_text(size=14))
+heatmap
+
+
+```
+
+```{r}
+
+## DotPlot
+dot_plot <- ggplot(meta_summary, aes(x=Gene, y=seurat_clusters)) +
+  geom_point(aes(size = Pct, fill = Avg), color="black", shape=21) +
+  scale_size("% detected", range = c(0,9)) +
+  scale_fill_gradientn(colours = viridisLite::inferno(4),
+                       guide = guide_colorbar(ticks.colour = "black",
+                                              frame.colour = "black"),
+                       name = "Average\nexpression") +
+  ylab("Cluster") + xlab("") +
+  coord_fixed()+
+  theme_bw() +
+  theme(axis.text.x = element_text(size=14, angle=45, hjust=1, color="black"),
+        axis.text.y = element_text(size=15, color="black"),
+        axis.title = element_text(size=14))
+
+dot_plot
+
